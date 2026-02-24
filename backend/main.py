@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from backend.retrieval import search_patents
-from backend.gemini import rerank
+from retrieval import search_patents
+from gemini import rerank
 
 app = FastAPI()
 
