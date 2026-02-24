@@ -3,6 +3,7 @@ import pickle
 import torch
 import numpy as np
 from transformers import AutoTokenizer, AutoModel
+import os
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -42,11 +43,19 @@ def embed(text):
 # -----------------------------
 # Load Index
 # -----------------------------
-index = faiss.read_index("patent.index")
 
-with open("patent_metadata.pkl", "rb") as f:
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+INDEX_PATH = os.path.join(BASE_DIR, "patent.index")
+
+index = faiss.read_index(INDEX_PATH)
+
+META_PATH = os.path.join(BASE_DIR, "patent_metadata.pkl")
+
+with open(META_PATH, "rb") as f:
     metadata = pickle.load(f)
-
 
 def search_patents(query, k=5):
 
