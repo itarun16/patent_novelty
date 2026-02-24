@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.git
+.gitignore
+
+# ML artifacts (IMPORTANT)
+*.pkl
+*.index
+*.jsonl
+
+# cache
+.cache/
