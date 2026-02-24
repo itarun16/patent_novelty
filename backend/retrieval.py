@@ -7,20 +7,49 @@ import os
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+tokenizer = None
+model = None
+index = None
+metadata = None
+
+
 # -----------------------------
-# Load PatentSBERTa
+# INITIALIZER
 # -----------------------------
-tokenizer = AutoTokenizer.from_pretrained(
-    "AI-Growth-Lab/PatentSBERTa"
-)
+def init_retrieval():
 
-model = AutoModel.from_pretrained(
-    "AI-Growth-Lab/PatentSBERTa"
-).to(DEVICE)
+    global tokenizer, model, index, metadata
 
-model.eval()
+    print("Loading PatentSBERTa...")
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        "AI-Growth-Lab/PatentSBERTa"
+    )
+
+    model = AutoModel.from_pretrained(
+        "AI-Growth-Lab/PatentSBERTa"
+    ).to(DEVICE)
+
+    model.eval()
+
+    print("Loading FAISS index...")
+
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+    INDEX_PATH = os.path.join(BASE_DIR, "patent.index")
+    META_PATH = os.path.join(BASE_DIR, "patent_metadata.pkl")
+
+    index = faiss.read_index(INDEX_PATH)
+
+    with open(META_PATH, "rb") as f:
+        metadata = pickle.load(f)
+
+    print("✅ Retrieval system ready")
 
 
+# -----------------------------
+# EMBEDDING
+# -----------------------------
 def embed(text):
 
     inputs = tokenizer(
@@ -41,22 +70,8 @@ def embed(text):
 
 
 # -----------------------------
-# Load Index
+# SEARCH
 # -----------------------------
-
-
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-INDEX_PATH = os.path.join(BASE_DIR, "patent.index")
-
-index = faiss.read_index(INDEX_PATH)
-
-META_PATH = os.path.join(BASE_DIR, "patent_metadata.pkl")
-
-with open(META_PATH, "rb") as f:
-    metadata = pickle.load(f)
-
 def search_patents(query, k=5):
 
     emb = embed(query)
@@ -66,7 +81,6 @@ def search_patents(query, k=5):
     results = []
 
     for idx, score in zip(I[0], D[0]):
-
         patent = metadata[idx]
 
         results.append({
