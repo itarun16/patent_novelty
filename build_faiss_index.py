@@ -1,51 +1,40 @@
+import os
 import json
 import pickle
 import faiss
-import torch
 import numpy as np
 from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModel
-
-
-# =====================================
-# DEVICE
-# =====================================
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-print("Using:", DEVICE)
-
+from dotenv import load_dotenv
+from google import genai
 
 # =====================================
-# LOAD PATENTSBERTA
+# INIT
 # =====================================
-tokenizer = AutoTokenizer.from_pretrained(
-    "AI-Growth-Lab/PatentSBERTa"
+load_dotenv()
+
+client = genai.Client(
+    api_key=os.getenv("GEMINI_API_KEY")
 )
 
-model = AutoModel.from_pretrained(
-    "AI-Growth-Lab/PatentSBERTa"
-).to(DEVICE)
+EMBED_MODEL = "gemini-embedding-001"
 
-model.eval()
+print("✅ Gemini configured")
 
 
 # =====================================
-# EMBEDDING FUNCTION
+# EMBED FUNCTION
 # =====================================
 def embed(text):
 
-    inputs = tokenizer(
-        text,
-        return_tensors="pt",
-        truncation=True,
-        padding=True,
-        max_length=512
-    ).to(DEVICE)
+    result = client.models.embed_content(
+        model=EMBED_MODEL,
+        contents=text
+    )
 
-    with torch.no_grad():
-        emb = model(**inputs).last_hidden_state.mean(dim=1)
-
-    emb = emb.cpu().numpy().astype("float32")
+    emb = np.array(
+        result.embeddings[0].values,
+        dtype="float32"
+    ).reshape(1, -1)
 
     faiss.normalize_L2(emb)
 
@@ -57,15 +46,9 @@ def embed(text):
 # =====================================
 patents = []
 
-with open(
-    "real_patents.jsonl",
-    "r",
-    encoding="utf-8"
-) as f:
-
+with open("real_patents.jsonl", "r", encoding="utf-8") as f:
     for line in f:
         patents.append(json.loads(line))
-
 
 print("Patents loaded:", len(patents))
 
@@ -78,17 +61,22 @@ metadata = []
 
 for patent in tqdm(patents):
 
-    text = patent["claims"]
+    text = patent.get("claims", "")
+
+    if not text:
+        continue
 
     try:
         emb = embed(text)
-
         embeddings.append(emb)
         metadata.append(patent)
 
-    except:
-        continue
+    except Exception as e:
+        print("Embedding failed:", e)
 
+
+if len(embeddings) == 0:
+    raise RuntimeError("No embeddings generated!")
 
 embeddings = np.vstack(embeddings)
 
@@ -96,12 +84,9 @@ print("Embedding shape:", embeddings.shape)
 
 
 # =====================================
-# BUILD FAISS INDEX
+# BUILD FAISS
 # =====================================
-index = faiss.IndexFlatIP(
-    embeddings.shape[1]
-)
-
+index = faiss.IndexFlatIP(embeddings.shape[1])
 index.add(embeddings)
 
 print("FAISS index size:", index.ntotal)
@@ -110,15 +95,9 @@ print("FAISS index size:", index.ntotal)
 # =====================================
 # SAVE
 # =====================================
-faiss.write_index(
-    index,
-    "patent.index"
-)
+faiss.write_index(index, "patent.index")
 
-with open(
-    "patent_metadata.pkl",
-    "wb"
-) as f:
+with open("patent_metadata.pkl", "wb") as f:
     pickle.dump(metadata, f)
 
 print("✅ INDEX BUILT SUCCESSFULLY")

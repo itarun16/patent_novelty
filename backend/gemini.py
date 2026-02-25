@@ -1,16 +1,17 @@
 import os
 import json
 import re
-from dotenv import load_dotenv
-import google.generativeai as genai
-
-load_dotenv()
+from google import genai
 
 model = None
 
+client = genai.Client(
+    api_key=os.getenv("GEMINI_API_KEY")
+)
+
 
 # -----------------------------
-# INITIALIZE GEMINI (LAZY LOAD)
+# INIT GEMINI
 # -----------------------------
 def init_gemini():
 
@@ -18,16 +19,7 @@ def init_gemini():
 
     print("Initializing Gemini...")
 
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY not set")
-
-    genai.configure(api_key=GEMINI_API_KEY)
-
-    model = genai.GenerativeModel(
-        "gemini-2.5-flash"
-    )
+    model = "gemini-2.5-flash"
 
     print("✅ Gemini ready")
 
@@ -40,7 +32,7 @@ def rerank(user_claim, retrieved):
     global model
 
     if model is None:
-        raise RuntimeError("Gemini not initialized")
+        init_gemini()
 
     prior_text = ""
 
@@ -70,9 +62,9 @@ PRIOR ART:
 
     try:
 
-        response = model.generate_content(
-            prompt,
-            generation_config={"temperature": 0}
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt
         )
 
         raw = response.text or ""
@@ -81,19 +73,14 @@ PRIOR ART:
         print(raw)
         print("======================\n")
 
-        # -------------------------
-        # SAFE JSON EXTRACTION
-        # -------------------------
         match = re.search(r"\[.*\]", raw, re.S)
 
         if not match:
-            print("⚠ Gemini returned invalid JSON")
-
             return [
                 {
                     "patent_id": r["id"],
                     "final_score": r["score"],
-                    "reason": "Fallback: JSON parse failed"
+                    "reason": "Fallback ranking"
                 }
                 for r in retrieved
             ]
@@ -102,13 +89,13 @@ PRIOR ART:
 
     except Exception as e:
 
-        print("🔥 Gemini failure:", e)
+        print("Gemini error:", e)
 
         return [
             {
                 "patent_id": r["id"],
                 "final_score": r["score"],
-                "reason": "Fallback ranking (LLM error)"
+                "reason": "Fallback ranking"
             }
             for r in retrieved
         ]

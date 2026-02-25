@@ -1,78 +1,88 @@
 import faiss
 import pickle
-import torch
 import numpy as np
-from transformers import AutoTokenizer, AutoModel
 import os
+from google import genai
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-tokenizer = None
-model = None
+# ------------------------------------
+# GLOBALS
+# ------------------------------------
 index = None
 metadata = None
 
+client = genai.Client(
+    api_key=os.getenv("GEMINI_API_KEY")
+)
 
-# -----------------------------
-# INITIALIZER
-# -----------------------------
+EMBED_MODEL = "gemini-embedding-001"
+
+
+# ------------------------------------
+# INIT RETRIEVAL
+# ------------------------------------
 def init_retrieval():
 
-    global tokenizer, model, index, metadata
+    global index, metadata
 
-    print("Loading PatentSBERTa...")
+    print("Initializing retrieval...")
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        "AI-Growth-Lab/PatentSBERTa"
+    BASE_DIR = os.path.dirname(
+        os.path.abspath(__file__)
     )
 
-    model = AutoModel.from_pretrained(
-        "AI-Growth-Lab/PatentSBERTa"
-    ).to(DEVICE)
+    INDEX_PATH = os.path.join(
+        BASE_DIR,
+        "patent.index"
+    )
 
-    model.eval()
-
-    print("Loading FAISS index...")
-
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-    INDEX_PATH = os.path.join(BASE_DIR, "patent.index")
-    META_PATH = os.path.join(BASE_DIR, "patent_metadata.pkl")
+    META_PATH = os.path.join(
+        BASE_DIR,
+        "patent_metadata.pkl"
+    )
 
     index = faiss.read_index(INDEX_PATH)
 
     with open(META_PATH, "rb") as f:
         metadata = pickle.load(f)
 
-    print("✅ Retrieval system ready")
+    print("✅ Retrieval ready")
 
 
-# -----------------------------
+# ------------------------------------
+# LAZY LOAD (Railway-safe)
+# ------------------------------------
+def ensure_loaded():
+    global index
+    if index is None:
+        init_retrieval()
+
+
+# ------------------------------------
 # EMBEDDING
-# -----------------------------
+# ------------------------------------
 def embed(text):
 
-    inputs = tokenizer(
-        text,
-        return_tensors="pt",
-        truncation=True,
-        padding=True,
-        max_length=512
-    ).to(DEVICE)
+    result = client.models.embed_content(
+        model=EMBED_MODEL,
+        contents=text
+    )
 
-    with torch.no_grad():
-        emb = model(**inputs).last_hidden_state.mean(dim=1)
+    emb = np.array(
+        result.embeddings[0].values,
+        dtype="float32"
+    ).reshape(1, -1)
 
-    emb = emb.cpu().numpy().astype("float32")
     faiss.normalize_L2(emb)
 
     return emb
 
 
-# -----------------------------
+# ------------------------------------
 # SEARCH
-# -----------------------------
+# ------------------------------------
 def search_patents(query, k=5):
+
+    ensure_loaded()
 
     emb = embed(query)
 
@@ -81,6 +91,7 @@ def search_patents(query, k=5):
     results = []
 
     for idx, score in zip(I[0], D[0]):
+
         patent = metadata[idx]
 
         results.append({
