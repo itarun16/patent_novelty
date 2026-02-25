@@ -2,9 +2,15 @@ import streamlit as st
 import requests
 import fitz
 
+# -----------------------------------
+# BACKEND URL
+# -----------------------------------
 API_URL = "https://patentnovelty-production.up.railway.app/search"
 
 
+# -----------------------------------
+# TEXT EXTRACTION
+# -----------------------------------
 def extract_text(upload):
 
     doc = fitz.open(
@@ -20,6 +26,9 @@ def extract_text(upload):
     return text
 
 
+# -----------------------------------
+# UI
+# -----------------------------------
 st.title("AI Patent Examiner")
 
 uploaded = st.file_uploader(
@@ -34,10 +43,9 @@ if uploaded:
     st.subheader("Extracted Claim")
     st.write(claim_text)
 
-    # RESET file pointer (IMPORTANT)
+    # IMPORTANT → reset file pointer
     uploaded.seek(0)
 
-    # SEND FILE (NOT JSON)
     response = requests.post(
         API_URL,
         files={
@@ -51,6 +59,9 @@ if uploaded:
 
     data = response.json()
 
+    # -----------------------------
+    # FAISS
+    # -----------------------------
     st.subheader("FAISS Retrieval")
 
     for r in data["faiss_results"]:
@@ -58,11 +69,26 @@ if uploaded:
             f"{r['id']} | {r['score']:.2f}"
         )
 
+    # -----------------------------
+    # GEMINI
+    # -----------------------------
     st.subheader("Gemini Examiner")
 
     for r in data["gemini_results"]:
+
         st.write(
             f"{r['patent_id']} "
             f"| Score={r['final_score']:.2f}"
         )
         st.write(r["reason"])
+
+        if "image_analysis" in r:
+            st.write(
+                "🖼 Image Score:",
+                r["image_analysis"]["image_score"]
+            )
+            st.write(
+                r["image_analysis"]["reason"]
+            )
+
+        st.divider()

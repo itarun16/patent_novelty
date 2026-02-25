@@ -1,94 +1,102 @@
 from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-import asyncio
+import io
+import fitz
 import pdfplumber
 
 from retrieval import search_patents, init_retrieval
-from gemini import rerank, init_gemini
+from gemini import rerank, init_gemini, image_relevance_score
+
+app = FastAPI()
 
 
-# ------------------------------------------------
-# FASTAPI INIT
-# ------------------------------------------------
-app = FastAPI(title="AI Patent Examiner")
-
-
-# ------------------------------------------------
-# CORS (frontend access)
-# ------------------------------------------------
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-# ------------------------------------------------
-# STARTUP — LOAD MODELS SAFELY
-# ------------------------------------------------
+# -----------------------------------
+# STARTUP
+# -----------------------------------
 @app.on_event("startup")
 async def startup():
 
-    print("\n🚀 Starting AI Patent Examiner...\n")
+    print("🚀 Starting AI Patent Examiner...")
 
-    # Load heavy systems in background thread
-    await asyncio.to_thread(init_retrieval)
-    await asyncio.to_thread(init_gemini)
+    init_retrieval()
+    init_gemini()
 
-    print("\n✅ SYSTEM READY\n")
-
-
-# ------------------------------------------------
-# HEALTH CHECK (IMPORTANT FOR RENDER)
-# ------------------------------------------------
-@app.get("/")
-def root():
-    return {"status": "running"}
+    print("✅ SYSTEM READY")
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-# ------------------------------------------------
-# PDF CLAIM EXTRACTION
-# ------------------------------------------------
-def extract_claim_text(file):
+# -----------------------------------
+# TEXT EXTRACTION
+# -----------------------------------
+def extract_claim_text(pdf_file):
 
     text = ""
 
-    with pdfplumber.open(file) as pdf:
+    with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
-            t = page.extract_text()
-            if t:
-                text += t + "\n"
+            text += page.extract_text() or ""
 
-    return text.strip()
+    return text
 
 
-# ------------------------------------------------
+# -----------------------------------
+# IMAGE EXTRACTION
+# -----------------------------------
+def extract_pdf_images(pdf_bytes):
+
+    doc = fitz.open(
+        stream=pdf_bytes,
+        filetype="pdf"
+    )
+
+    images = []
+
+    for page in doc:
+
+        for img in page.get_images(full=True):
+
+            xref = img[0]
+            base_image = doc.extract_image(xref)
+            images.append(base_image["image"])
+
+    return images
+
+
+# -----------------------------------
 # SEARCH ENDPOINT
-# ------------------------------------------------
+# -----------------------------------
 @app.post("/search")
 async def search(file: UploadFile = File(...)):
 
-    # ---------- Extract Claim ----------
-    claim_text = extract_claim_text(file.file)
+    pdf_bytes = await file.read()
+
+    claim_text = extract_claim_text(
+        io.BytesIO(pdf_bytes)
+    )
 
     if not claim_text:
-        return {"error": "No text found in PDF"}
+        return {"error": "No text found"}
 
-    # ---------- FAISS Retrieval ----------
+    images = extract_pdf_images(pdf_bytes)
+
     retrieved = search_patents(claim_text)
 
-    # ---------- Gemini Rerank ----------
     reranked = rerank(claim_text, retrieved)
+
+    # Image relevance (TOP 3 only)
+    for r in reranked[:3]:
+
+        r["image_analysis"] = image_relevance_score(
+            claim_text,
+            images,
+            r
+        )
 
     return {
         "claim": claim_text,
         "faiss_results": retrieved,
         "gemini_results": reranked
     }
+
+
+@app.get("/health")
+def health():
+    return {"status": "running"}
