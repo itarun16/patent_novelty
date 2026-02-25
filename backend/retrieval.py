@@ -3,6 +3,10 @@ import pickle
 import numpy as np
 import os
 from google import genai
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 # ------------------------------------
 # GLOBALS

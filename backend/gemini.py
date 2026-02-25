@@ -2,7 +2,8 @@ import os
 import json
 import re
 from google import genai
-
+from dotenv import load_dotenv
+load_dotenv()
 model = None
 
 client = genai.Client(

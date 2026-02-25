@@ -34,23 +34,33 @@ if uploaded:
     st.subheader("Extracted Claim")
     st.write(claim_text)
 
+    # RESET file pointer (IMPORTANT)
+    uploaded.seek(0)
+
+    # SEND FILE (NOT JSON)
     response = requests.post(
         API_URL,
-        json={"claim": claim_text}
+        files={
+            "file": (
+                uploaded.name,
+                uploaded,
+                "application/pdf"
+            )
+        }
     )
 
     data = response.json()
 
     st.subheader("FAISS Retrieval")
 
-    for r in data["retrieved"]:
+    for r in data["faiss_results"]:
         st.write(
             f"{r['id']} | {r['score']:.2f}"
         )
 
     st.subheader("Gemini Examiner")
 
-    for r in data["reranked"]:
+    for r in data["gemini_results"]:
         st.write(
             f"{r['patent_id']} "
             f"| Score={r['final_score']:.2f}"
