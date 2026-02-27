@@ -29,41 +29,75 @@ def multimodal_examiner(user_claim, images, candidate):
     try:
 
         prompt = f"""
-You are a professional patent examiner.
+You are acting as a professional patent examiner.
 
-The USER has provided:
-- A textual claim
-- Supporting images describing their invention
+Your task is to evaluate whether the USER invention is disclosed by the CANDIDATE patent.
 
-Your task:
-Evaluate whether the CANDIDATE PATENT discloses what is shown in the USER IMAGES.
+You must perform THREE independent analyses:
 
-Compare:
-1. Technical disclosure overlap
-2. Whether the CANDIDATE CLAIM covers what is shown in the images
-3. Training method similarity (if applicable)
+---------------------------------------
+1. CLAIM vs CLAIM ANALYSIS
+---------------------------------------
+Compare the USER CLAIM and the CANDIDATE CLAIM.
 
-Important:
-- Images describe the USER invention.
-- Determine if the CANDIDATE patent teaches what is visible in the images.
-- Do NOT compare images against the USER claim text.
-- Compare images strictly against the CANDIDATE claim.
+Determine:
+- Technical feature overlap
+- Missing features
+- Novel or distinguishing elements
+- Whether the CANDIDATE claim would anticipate the USER claim
 
-Return JSON ONLY:
+---------------------------------------
+2. USER IMAGES vs CANDIDATE CLAIM
+---------------------------------------
+The user images represent the USER invention.
 
+Evaluate:
+- Do the CANDIDATE claims describe what is shown visually?
+- Are core structural or functional elements present?
+
+---------------------------------------
+3. CANDIDATE IMAGES vs USER CLAIM
+---------------------------------------
+If candidate patent images are available, determine:
+- Whether those images disclose what is claimed in the USER claim.
+- Whether a skilled examiner would consider the invention visually disclosed.
+
+---------------------------------------
+SCORING RULES
+---------------------------------------
+claim_score:
+Similarity of textual claims only.
+
+image_score:
+Similarity between visual disclosures and claims.
+
+final_score:
+Overall likelihood that the USER invention is already disclosed.
+
+Range: 0.0 to 1.0
+
+Guideline:
+0.0 = completely different inventions
+0.5 = partial overlap
+1.0 = same invention / highly anticipatory
+
+---------------------------------------
+OUTPUT FORMAT (STRICT JSON ONLY)
+---------------------------------------
 {{
-"final_score":0.0-1.0,
-"image_score":0.0-1.0,
-"reason":"short technical explanation"
+  "claim_score": 0.0,
+  "image_score": 0.0,
+  "final_score": 0.0,
+  "reason": "Technical examiner-style explanation explaining overlap and differences."
 }}
 
-USER CLAIM (text reference only):
+USER CLAIM:
 {user_claim}
 
 CANDIDATE CLAIM:
 {candidate.get("claims","")}
 
-FAISS SIMILARITY:
+FAISS SIMILARITY (reference only):
 {candidate.get("score",0)}
 """
 
