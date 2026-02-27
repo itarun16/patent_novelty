@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import fitz
+import base64
 
 # -----------------------------------
 # BACKEND URL
@@ -58,6 +59,13 @@ if uploaded:
     )
 
     data = response.json()
+    st.subheader("Extracted Images")
+
+    for img_str in data["images"]:
+        st.image(
+            base64.b64decode(img_str),
+            use_container_width=True
+        )
 
     # -----------------------------
     # FAISS

@@ -1,103 +1,177 @@
+#!/usr/bin/env python3
+"""
+Multimodal Patent Index Builder (Updated)
+-----------------------------------------
+• PatentSBERTa → FAISS text index
+• CLIP → stored multimodal embeddings
+• CPU compatible
+• Handles relative paths by prepending BASE_IMAGE_PATH
+• Skips missing/unreadable images with warnings
+• Prints summary of patents with missing images
+"""
+
 import os
 import json
 import pickle
 import faiss
 import numpy as np
+import torch
+import open_clip
+from PIL import Image
 from tqdm import tqdm
-from dotenv import load_dotenv
-from google import genai
+from sentence_transformers import SentenceTransformer
 
 # =====================================
-# INIT
+# CONFIG
 # =====================================
-load_dotenv()
+DATASET_PATH = "dataset_claim_2images.jsonl"
+TEXT_INDEX_PATH = "claims_only.index"
+META_PATH = "multimodal_metadata.pkl"
 
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
+SBERT_MODEL = "AI-Growth-Lab/PatentSBERTa"
+DEVICE = "cpu"
+
+# Base path where images are stored
+BASE_IMAGE_PATH = r"C:\Users\Tarun\OneDrive\Documents\newdataset"
+
+# =====================================
+# LOAD MODELS
+# =====================================
+print("Loading PatentSBERTa...")
+sbert = SentenceTransformer(SBERT_MODEL, device=DEVICE)
+
+print("Loading CLIP...")
+clip_model, _, clip_preprocess = open_clip.create_model_and_transforms(
+    "ViT-B-32",
+    pretrained="openai"
 )
+clip_model = clip_model.to(DEVICE)
+clip_model.eval()
 
-EMBED_MODEL = "gemini-embedding-001"
-
-print("✅ Gemini configured")
-
-
-# =====================================
-# EMBED FUNCTION
-# =====================================
-def embed(text):
-
-    result = client.models.embed_content(
-        model=EMBED_MODEL,
-        contents=text
-    )
-
-    emb = np.array(
-        result.embeddings[0].values,
-        dtype="float32"
-    ).reshape(1, -1)
-
-    faiss.normalize_L2(emb)
-
-    return emb
-
+print("✅ Models loaded")
 
 # =====================================
-# LOAD PATENTS
+# CLIP HELPERS
+# =====================================
+def clip_text_embed(text):
+    with torch.no_grad():
+        tokens = open_clip.tokenize([text])
+        features = clip_model.encode_text(tokens)
+        features /= features.norm(dim=-1, keepdim=True)
+    return features.cpu().numpy()[0].astype("float32")
+
+def clip_image_embed(path):
+    if not os.path.exists(path):
+        print(f"⚠️ Image not found: {path}")
+        return None
+    try:
+        image = clip_preprocess(Image.open(path).convert("RGB")).unsqueeze(0)
+        with torch.no_grad():
+            features = clip_model.encode_image(image)
+            features /= features.norm(dim=-1, keepdim=True)
+        return features.cpu().numpy()[0].astype("float32")
+    except Exception as e:
+        print(f"⚠️ Failed to embed image {path}: {e}")
+        return None
+
+# =====================================
+# LOAD DATASET WITH FULL IMAGE PATHS
 # =====================================
 patents = []
+patents_missing_images = []
 
-with open("real_patents.jsonl", "r", encoding="utf-8") as f:
+with open(DATASET_PATH, "r", encoding="utf-8") as f:
     for line in f:
-        patents.append(json.loads(line))
+        patent = json.loads(line)
+        # prepend base path and normalize
+        patent["images"] = [
+            os.path.normpath(os.path.join(BASE_IMAGE_PATH, img))
+            for img in patent.get("images", [])
+        ]
+        if any(not os.path.exists(img) for img in patent["images"]):
+            patents_missing_images.append(patent["patent_id"])
+        patents.append(patent)
 
 print("Patents loaded:", len(patents))
-
+if patents_missing_images:
+    print(f"⚠️ Patents with missing images: {len(patents_missing_images)}")
 
 # =====================================
 # BUILD EMBEDDINGS
 # =====================================
-embeddings = []
+text_embeddings = []
 metadata = []
 
 for patent in tqdm(patents):
 
-    text = patent.get("claims", "")
+    patent_id = patent.get("patent_id")
+    claims = patent.get("claims", "")
+    images = patent.get("images", [])
 
-    if not text:
+    if not claims:
         continue
 
     try:
-        emb = embed(text)
-        embeddings.append(emb)
-        metadata.append(patent)
+        # --- SBERT embedding (for FAISS recall)
+        sbert_emb = sbert.encode(
+            claims,
+            convert_to_numpy=True,
+            normalize_embeddings=True
+        ).astype("float32")
+
+        text_embeddings.append(sbert_emb)
+
+        # --- CLIP embeddings
+        clip_text_emb = clip_text_embed(claims)
+
+        clip_image_embs = []
+        for img_path in images:
+            emb = clip_image_embed(img_path)
+            if emb is not None:
+                clip_image_embs.append(emb)
+
+        metadata.append({
+            "patent_id": patent_id,
+            "claims": claims,
+            "clip_text_embedding": clip_text_emb,
+            "clip_image_embeddings": clip_image_embs
+        })
 
     except Exception as e:
-        print("Embedding failed:", e)
+        print(f"Embedding failed for {patent_id}: {e}")
 
-
-if len(embeddings) == 0:
+if len(text_embeddings) == 0:
     raise RuntimeError("No embeddings generated!")
 
-embeddings = np.vstack(embeddings)
+text_embeddings = np.vstack(text_embeddings)
 
-print("Embedding shape:", embeddings.shape)
-
+print("SBERT embedding shape:", text_embeddings.shape)
 
 # =====================================
-# BUILD FAISS
+# BUILD FAISS (Cosine Similarity)
 # =====================================
-index = faiss.IndexFlatIP(embeddings.shape[1])
-index.add(embeddings)
+dim = text_embeddings.shape[1]
+index = faiss.IndexFlatIP(dim)
+index.add(text_embeddings)
 
 print("FAISS index size:", index.ntotal)
-
 
 # =====================================
 # SAVE
 # =====================================
-faiss.write_index(index, "patent.index")
+faiss.write_index(index, TEXT_INDEX_PATH)
 
-with open("patent_metadata.pkl", "wb") as f:
+with open(META_PATH, "wb") as f:
     pickle.dump(metadata, f)
 
-print("✅ INDEX BUILT SUCCESSFULLY")
+print("✅ MULTIMODAL INDEX BUILT SUCCESSFULLY")
+
+# =====================================
+# SUMMARY
+# =====================================
+if patents_missing_images:
+    print("\nSummary: Patents with missing images:")
+    for pid in patents_missing_images:
+        print(f" - {pid}")
+else:
+    print("\nAll patents have images present.")

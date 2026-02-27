@@ -1,7 +1,9 @@
 import os
 import json
 import re
+
 from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,121 +12,101 @@ client = genai.Client(
     api_key=os.getenv("GEMINI_API_KEY")
 )
 
-model = "gemini-2.5-flash"
+MODEL = "gemini-2.5-flash"
 
 
-# -----------------------------------
+# -------------------------------
 def init_gemini():
     print("Initializing Gemini...")
     print("✅ Gemini ready")
 
 
-# -----------------------------------
-# TEXT RERANK
-# -----------------------------------
-def rerank(user_claim, retrieved):
-
-    prior_text = ""
-
-    for r in retrieved:
-        prior_text += f"""
-Patent: {r['id']}
-Claim: {r['claims']}
-Similarity: {r['score']}
-------------------
-"""
-
-    prompt = f"""
-Return ONLY JSON list.
-
-Format:
-[
-{{"patent_id":"ID","final_score":0.9,"reason":"text"}}
-]
-
-USER CLAIM:
-{user_claim}
-
-PRIOR ART:
-{prior_text}
-"""
-
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt
-    )
-
-    raw = response.text or ""
-
-    match = re.search(r"\[.*\]", raw, re.S)
-
-    if not match:
-        return [
-            {
-                "patent_id": r["id"],
-                "final_score": r["score"],
-                "reason": "Fallback"
-            }
-            for r in retrieved
-        ]
+# -------------------------------
+# SINGLE MULTIMODAL EXAMINER
+# -------------------------------
+def multimodal_examiner(user_claim, images, candidate):
 
     try:
-        return json.loads(match.group())
-    except:
-        return [
-            {
-                "patent_id": r["id"],
-                "final_score": r["score"],
-                "reason": "Fallback"
-            }
-            for r in retrieved
-        ]
 
+        prompt = f"""
+You are a professional patent examiner.
 
-# -----------------------------------
-# IMAGE ANALYSIS
-# -----------------------------------
-def image_relevance_score(user_claim, images, candidate):
+The USER has provided:
+- A textual claim
+- Supporting images describing their invention
 
-    prompt = f"""
+Your task:
+Evaluate whether the CANDIDATE PATENT discloses what is shown in the USER IMAGES.
+
+Compare:
+1. Technical disclosure overlap
+2. Whether the CANDIDATE CLAIM covers what is shown in the images
+3. Training method similarity (if applicable)
+
+Important:
+- Images describe the USER invention.
+- Determine if the CANDIDATE patent teaches what is visible in the images.
+- Do NOT compare images against the USER claim text.
+- Compare images strictly against the CANDIDATE claim.
+
 Return JSON ONLY:
 
-{{"image_score":0.0-1.0,"reason":"short"}}
+{{
+"final_score":0.0-1.0,
+"image_score":0.0-1.0,
+"reason":"short technical explanation"
+}}
 
-USER CLAIM:
+USER CLAIM (text reference only):
 {user_claim}
 
 CANDIDATE CLAIM:
-{candidate["reason"]}
+{candidate.get("claims","")}
+
+FAISS SIMILARITY:
+{candidate.get("score",0)}
 """
 
-    parts = [prompt]
+        contents = [prompt]
 
-    for img in images[:2]:
-        parts.append({
-            "mime_type": "image/png",
-            "data": img
-        })
+        # attach user images
+        for img in images[:2]:
 
-    response = client.models.generate_content(
-        model=model,
-        contents=parts
-    )
+            mime = f"image/{img['mime']}"
 
-    raw = response.text or ""
+            contents.append(
+                types.Part.from_bytes(
+                    data=img["bytes"],
+                    mime_type=mime
+                )
+            )
 
-    match = re.search(r"\{.*\}", raw, re.S)
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=contents
+        )
 
-    if not match:
+        raw = response.text or ""
+
+        match = re.search(r"\{.*\}", raw, re.S)
+
+        if not match:
+            raise ValueError("No JSON returned")
+
+        result = json.loads(match.group())
+
+        result["patent_id"] = candidate["id"]
+
+        return result
+
+    except Exception as e:
+
+        print("MULTIMODAL ERROR:", e)
+
+        # fallback using FAISS score
         return {
+            "patent_id": candidate["id"],
+            "final_score": candidate["score"],
             "image_score": 0.0,
-            "reason": "Fallback image analysis"
-        }
-
-    try:
-        return json.loads(match.group())
-    except:
-        return {
-            "image_score": 0.0,
-            "reason": "Parsing error"
+            "reason": "Fallback (Gemini unavailable)"
         }
