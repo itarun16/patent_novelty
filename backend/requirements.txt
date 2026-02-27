@@ -9,3 +9,7 @@ google-genai
 pydantic
 requests
 PyMuPDF
+torch
+open-clip-torch
+Pillow
+sentence-transformers
