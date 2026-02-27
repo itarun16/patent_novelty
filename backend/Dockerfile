@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # =====================================
 COPY requirements.txt .
 
+RUN pip install --upgrade pip
+
 # Install CPU torch first
 RUN pip install --no-cache-dir \
     torch==2.2.0+cpu \
@@ -32,5 +34,5 @@ COPY . .
 
 ENV PYTHONUNBUFFERED=1
 
-# Railway uses PORT env automatically
+# Railway PORT support
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
