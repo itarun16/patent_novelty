@@ -1,15 +1,23 @@
-fastapi
-uvicorn
-python-multipart
-pdfplumber
-faiss-cpu
-numpy
-python-dotenv
-google-genai
-pydantic
-requests
-PyMuPDF
-torch
-open-clip-torch
-Pillow
-sentence-transformers
+# Core API
+fastapi==0.111.0
+uvicorn==0.25.0
+python-multipart==0.0.6
+pydantic==1.10.11
+python-dotenv==1.0.0
+requests==2.31.0
+
+# PDF / patent processing
+pdfplumber==0.9.0
+PyMuPDF==1.23.6
+
+# FAISS / vector search
+faiss-cpu==1.7.4
+
+# Numeric / ML
+numpy==1.26.4
+
+# Multimodal / embeddings
+torch==2.2.0+cpu --index-url https://download.pytorch.org/whl/cpu
+open-clip-torch==2.0.2
+sentence-transformers==2.2.2
+Pillow==10.0.0
