@@ -6,7 +6,7 @@ import base64
 # =====================================
 # CONFIG
 # =====================================
-API_URL = "http://127.0.0.1:8000/search"
+API_URL = "https://patentnovelty-production.up.railway.app/search"
 
 st.set_page_config(
     page_title="AI Patent Examiner",
